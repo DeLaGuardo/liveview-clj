@@ -20,7 +20,7 @@ var LiveView = function(endpoint) {
                     } else if (handlers[data.topic]) {
                         handlers[data.topic](data.value);
                     } else {
-                        console.error("Unknown handler type " + data.topic);
+                        console.error("Unknown topic " + data.topic);
                     }
                 };
                 obj.socket.onclose = function(e) {
