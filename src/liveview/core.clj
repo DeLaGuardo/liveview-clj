@@ -60,12 +60,14 @@
   (send [this topic data]))
 
 (defn start-instance [liveview
-                      {:keys [render on-event on-mount on-disconnect
+                      {:keys [render on-event on-send-encoder on-mount on-disconnect
                               mount-timeout]
                        external-state :state
                        :as opts
                        :or {on-event (fn [_ _]
                                        (logger/warn "Undefined event handler"))
+                            ;; Delegate data encoding to json/generate-string by default
+                            on-send-encoder identity
                             external-state (atom nil)
                             mount-timeout 5000}}]
   (let [id (new-id)
@@ -121,7 +123,7 @@
                  :on-send (fn [topic data]
                             (a/>!! sink (json/generate-string
                                          {:topic topic
-                                          :value data})))
+                                          :value (on-send-encoder data)})))
                  :stop (fn []
                          (remove-watch external-state [::watcher id])
                          (a/close! sink)
