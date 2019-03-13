@@ -1,4 +1,5 @@
 (ns liveview.core
+  (:refer-clojure :exclude [send])
   (:require [cheshire.core :as json]
             [clojure.core.async :as a]
             [clojure.java.io :as io]
@@ -53,6 +54,10 @@
   (let [task (expire-task clb)]
     (.schedule timer task timeout)
     task))
+
+(defprotocol LiveviewPage
+  (body [this])
+  (send [this topic data]))
 
 (defn start-instance [liveview
                       {:keys [render on-event on-mount on-disconnect
@@ -113,6 +118,10 @@
                           (reset! state (dismounted)))))]
                 {:name :mounted
                  :on-mount (fn [_] (throw (Exception. "Double mount. (Race condition?)")))
+                 :on-send (fn [topic data]
+                            (a/>!! sink (json/generate-string
+                                         {:topic topic
+                                          :value data})))
                  :stop (fn []
                          (remove-watch external-state [::watcher id])
                          (a/close! sink)
@@ -131,16 +140,19 @@
               (when on-disconnect (on-disconnect))
               (deregister-instance liveview id))]
       (reset! state (initialized)))
-    (binding [*id* id]
-      (render @external-state))))
+    (reify
+      LiveviewPage
+      (body [this]
+        (binding [*id* id]
+          (render @external-state)))
+      (send [this topic data]
+        ((:on-send @state) topic data)))))
 
 (defn render [dom]
   (str (hiccup/html dom)))
 
-(defn page [liveview req opts]
-  {:status 200
-   :headers {"Content-Type" "text/html"}
-   :body (start-instance liveview opts)})
+(defn page [liveview req & {:as opts}]
+  (start-instance liveview opts))
 
 (defn ws-handler [liveview adapter]
   (fn [req]

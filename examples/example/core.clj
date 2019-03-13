@@ -30,10 +30,13 @@
 
 (def config
   {[:example.todo/state ::state] {:todos {}}
+   [:example.increment/state ::state] 0
    :example.todo/handler {:liveview (ig/ref ::liveview/liveview)
                           ;; :state (ig/ref :example.todo/state)
                           }
-   :example.increment/handler {:liveview (ig/ref ::liveview/liveview)}
+   :example.increment/handler {:liveview (ig/ref ::liveview/liveview)
+                               ;; :state (ig/ref :example.increment/state)
+                               }
    ::router {:routes {"/todo" [:todo]
                       "/increment" [:increment]
                       "/ws" [:liveview]}
