@@ -1,6 +1,6 @@
 var LiveView = function(endpoint) {
     var running = true,
-        handlers = {},
+        registeredHandlers = {},
         obj = {
             socket: null,
             sendEvent: function(type, event) {
@@ -17,8 +17,8 @@ var LiveView = function(endpoint) {
                     var data = JSON.parse(e.data);
                     if (data.type == "rerender") {
                         morphdom(document.documentElement, data.value);
-                    } else if (handlers[data.topic]) {
-                        handlers[data.topic](data.value);
+                    } else if (registeredHandlers[data.topic]) {
+                        registeredHandlers[data.topic](data.value);
                     } else {
                         console.error("Unknown topic " + data.topic);
                     }
@@ -33,11 +33,14 @@ var LiveView = function(endpoint) {
                 running = false;
                 obj.socket.close();
             },
-            regHandler: function(topic, handler) {
-                handlers[topic] = handler;
+            regHandlers: function(handlers, callback) {
+                handlers.forEach(function(el) {
+                    registeredHandlers[el.topic] = el.handler;
+                });
+                callback.call();
             },
             dropHandler: function(topic) {
-                delete(handlers[topic]);
+                delete(registeredHandlers[topic]);
             }
         };
     obj.connect();
