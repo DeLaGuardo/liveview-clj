@@ -34,8 +34,8 @@ var LiveView = function(endpoint) {
                 obj.socket.close();
             },
             regHandlers: function(handlers, callback) {
-                handlers.forEach(function(el) {
-                    registeredHandlers[el.topic] = el.handler;
+                Object.entries(handlers).forEach(function(el) {
+                    registeredHandlers[el[0]] = el[1];
                 });
                 callback.call();
             },
