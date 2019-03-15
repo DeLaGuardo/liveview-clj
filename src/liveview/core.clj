@@ -91,7 +91,7 @@
                              (.cancel expire-task)
                              (reset! state (mounted socket)))
                  :stop (fn [] (.cancel expire-task))}))
-            (mounted [{:keys [sink source] :as socket}]
+            (mounted [{:keys [sink source] :as socket} & send-queue]
               (logger/debug "Mounted" {:instance id})
               (when on-mount (on-mount socket))
               (rerender sink @external-state)
@@ -118,24 +118,31 @@
                         (do
                           (remove-watch external-state [::watcher id])
                           (reset! state (dismounted)))))]
-                {:name :mounted
-                 :on-mount (fn [_] (throw (Exception. "Double mount. (Race condition?)")))
-                 :on-send (fn [topic data]
-                            (a/>!! sink (json/generate-string
-                                         {:topic topic
-                                          :value (on-send-encoder data)})))
-                 :stop (fn []
-                         (remove-watch external-state [::watcher id])
-                         (a/close! sink)
-                         (a/close! source)
-                         (a/<!! worker))}))
+                (letfn [(on-send [topic data]
+                          (a/>!! sink (json/generate-string
+                                       {:topic topic
+                                        :value (on-send-encoder data)})))]
+                  (when (not-empty send-queue)
+                    (doseq [[topic data] send-queue]
+                      (on-send topic data)))
+                  {:name :mounted
+                   :on-mount (fn [_] (throw (Exception. "Double mount. (Race condition?)")))
+                   :on-send on-send
+                   :stop (fn []
+                           (remove-watch external-state [::watcher id])
+                           (a/close! sink)
+                           (a/close! source)
+                           (a/<!! worker))})))
             (dismounted []
               (logger/debug "Dismounted" {:instance id})
-              (let [expire-task (set-expire-task liveview disconnected mount-timeout)]
+              (let [expire-task (set-expire-task liveview disconnected mount-timeout)
+                    send-queue (atom [])]
                 {:name :dismounted
                  :on-mount (fn [socket]
                              (.cancel expire-task)
-                             (reset! state (mounted socket)))
+                             (reset! state (apply (partial mounted socket) @send-queue)))
+                 :on-send (fn [topic data]
+                            (swap! send-queue conj [topic data]))
                  :stop (fn [] (.cancel expire-task))}))
             (disconnected []
               (logger/debug "Disconnected" {:instance id})
