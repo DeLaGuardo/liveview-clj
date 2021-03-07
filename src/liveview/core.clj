@@ -1,7 +1,7 @@
 (ns liveview.core
   (:refer-clojure :exclude [send])
-  (:require [cheshire.core :as json]
-            [clojure.core.async :as a]
+  (:require [jsonista.core :as json]
+            [clojure.core.async :as async]
             [clojure.java.io :as io]
             [clojure.tools.logging :as logger]
             [hiccup2.core :as hiccup])
@@ -43,7 +43,7 @@
   (proxy [TimerTask] []
     (run [] (clb))))
 
-(defn register-instance [{:keys [instances timer]}
+(defn register-instance [{:keys [instances _timer]}
                          {:keys [id] :as instance}]
   (swap! instances assoc id instance))
 
@@ -60,10 +60,8 @@
   (send [this topic data]))
 
 (defn start-instance [liveview
-                      {:keys [render on-event on-send-encoder on-mount on-disconnect
-                              mount-timeout]
+                      {:keys [render on-event on-send-encoder on-mount on-disconnect mount-timeout]
                        external-state :state
-                       :as opts
                        :or {on-event (fn [_ _]
                                        (logger/warn "Undefined event handler"))
                             ;; Delegate data encoding to json/generate-string by default
@@ -75,10 +73,11 @@
         rerender (fn [sink state']
                    (when (not= @prev-external-state state')
                      (reset! prev-external-state state')
-                     (a/>!! sink (json/generate-string
-                                  {:type "rerender"
-                                   :value (binding [*id* id]
-                                            (render state'))}))))
+                     (async/>!! sink (json/write-value-as-string
+                                      {:type "rerender"
+                                       :value (binding [*id* id]
+                                                (render state'))}
+                                      json/keyword-keys-object-mapper))))
         state (atom nil)
         instance {:id id
                   :on-mount (fn [socket] ((:on-mount @state) socket))
@@ -99,11 +98,11 @@
                          (fn [_ _ _ state']
                            (rerender sink state')))
               (let [worker
-                    (a/go-loop []
-                      (if-let [v (a/<! source)]
+                    (async/go-loop []
+                      (if-let [v (async/<! source)]
                         (do
                           (try
-                            (let [v' (json/parse-string v true)]
+                            (let [v' (json/read-value v json/keyword-keys-object-mapper)]
                               (logger/debug "Event" {:instance id
                                                      :event v'})
                               (case (:type v')
@@ -119,9 +118,10 @@
                           (remove-watch external-state [::watcher id])
                           (reset! state (dismounted)))))]
                 (letfn [(on-send [topic data]
-                          (a/>!! sink (json/generate-string
-                                       {:topic topic
-                                        :value (on-send-encoder data)})))]
+                          (async/>!! sink (json/write-value-as-string
+                                           {:topic topic
+                                            :value (on-send-encoder data)}
+                                           json/keyword-keys-object-mapper)))]
                   (when (not-empty send-queue)
                     (doseq [[topic data] send-queue]
                       (on-send topic data)))
@@ -130,9 +130,9 @@
                    :on-send on-send
                    :stop (fn []
                            (remove-watch external-state [::watcher id])
-                           (a/close! sink)
-                           (a/close! source)
-                           (a/<!! worker))})))
+                           (async/close! sink)
+                           (async/close! source)
+                           (async/<!! worker))})))
             (dismounted []
               (logger/debug "Dismounted" {:instance id})
               (let [expire-task (set-expire-task liveview disconnected mount-timeout)
@@ -160,7 +160,7 @@
 (defn render [dom]
   (str (hiccup/html dom)))
 
-(defn page [liveview req & {:as opts}]
+(defn page [liveview _req & {:as opts}]
   (start-instance liveview opts))
 
 (defn ws-handler [liveview adapter]
@@ -170,5 +170,5 @@
       (if-let [instance (get @(:instances liveview) id)]
         ((:on-mount instance) socket)
         (do (logger/warn "Unknown instance" {:id id})
-            (a/close! (:sink socket))) )
+            (async/close! (:sink socket))) )
       nil)))
